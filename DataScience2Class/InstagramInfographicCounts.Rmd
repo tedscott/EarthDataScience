@@ -1,0 +1,48 @@
+---
+title: "Ted Scott Infographic Work"
+output: html_notebook
+---
+
+Work with json data from some social media providers
+
+```{r}
+library(tidyverse)
+library(jsonlite)
+library(lubridate)
+```
+
+# Instagram
+
+```{r}
+setwd("C:/Users/tscott/OneDrive - Eastside Preparatory School/Courses/DataScience/")
+instagram <- fromJSON("data/2022 Social Data for Infographic/scott.ted_20220822_instagram/likes/liked_posts.json")
+
+# what's in it?
+head(instagram)
+
+# very messy structure and also it is a list and not a DF
+# coerce it
+(instagram2 <- as.data.frame(instagram))
+
+# in order to use unnest to flatten out the third column we can use unnest
+# but we have to give unnest this new column name
+instagramDF <- instagram %>% as.data.frame %>% unnest(likes_media_likes.string_list_data)
+
+# amazingly, this works!
+# can rename columns and do some counting
+instagramDF <- instagramDF %>% transmute(Account = likes_media_likes.title,
+                         Timestamp = as.Date(as.POSIXct(timestamp, origin = "1970-01-01")),
+                         Year = year(Timestamp))
+
+# some counts
+(instaCounts <- instagramDF %>% group_by(Year) %>% summarise(Count = n()))
+
+# also plot it
+instaCounts %>% ggplot() + 
+  geom_bar(aes(x=Year, y=Count), stat="identity") +
+  labs(title = "Count of IG Likes on Posts by Year")
+
+
+
+```
+

@@ -1,0 +1,102 @@
+---
+title: "Ted Scott Infographic Work"
+output: html_notebook
+---
+
+Work with json data from some social media providers
+
+```{r}
+library(tidyverse)
+library(jsonlite)
+library(lubridate)
+```
+
+# Instagram
+
+```{r}
+setwd("C:/Users/tscott/OneDrive - Eastside Preparatory School/Courses/DataScience/")
+instagram <- fromJSON("data/2022 Social Data for Infographic/scott.ted_20220822_instagram/likes/liked_posts.json")
+
+# what's in it?
+head(instagram)
+
+# very messy structure and also it is a list and not a DF
+# will need to "flatten" the nested columns
+
+# in order to flatten out the third column we can use unnest()
+# but we have to give unnest this new column name
+instagramDF <- instagram %>% as.data.frame %>% unnest(likes_media_likes.string_list_data)
+
+# amazingly, this works!
+# can rename columns and do some counting
+# but first have to fix the timestamps to be meaningful dates/years
+instagramDF <- instagramDF %>% transmute(Account = likes_media_likes.title,
+                         Timestamp = as.Date(as.POSIXct(timestamp, origin = "1970-01-01")),
+                         Year = year(Timestamp))
+
+# some counts
+(instaCounts <- instagramDF %>% group_by(Year) %>% summarise(Count = n()))
+
+# also plot it
+instaCounts %>% ggplot() + 
+  geom_bar(aes(x=Year, y=Count), stat="identity") +
+  labs(title = "Count of IG Likes on Posts by Year")
+
+```
+
+# now on to YouTube
+
+```{r}
+getwd()
+youtube <- fromJSON("../DataScience/data/2022 Social Data for Infographic/YouTube_Takeout_20220822/YouTube and YouTube Music/history/watch-history.json")
+
+# what's in it?
+head(youtube)
+
+# very messy structure and also it is a list and not a DF
+# coerce it and flatten nested column subtitles to extract the name/account
+(youtubeDF <- youtube %>% as.data.frame %>% unnest(subtitles))
+
+youtubeDF <- youtubeDF %>% select(Name = name, Time = time) %>%
+  mutate(Year = year(Time)) %>% select(Name, Year)
+
+# some counts
+(youtubeCounts <- youtubeDF %>% group_by(Year) %>% summarise(Count = n()))
+
+# also plot it
+youtubeCounts %>% ggplot() + 
+  geom_bar(aes(x=Year, y=Count), stat="identity") +
+  labs(title = "Count of YouTube Watches by Year") +
+  scale_x_continuous(breaks = 2010:2022)
+
+
+
+```
+
+# Spotify
+
+```{r}
+getwd()
+spotify <- fromJSON("../DataScience/data/2022 Social Data for Infographic/MySpotifyData/StreamingHistory0.json")
+
+# what's in it?
+head(spotify)
+
+# much cleaner structure so can start using it right away!
+spotifyDF <- spotify %>% as.data.frame %>% 
+  mutate(Year = year(endTime))
+
+spotifyDF <- spotifyDF %>% mutate(PlayedMin = msPlayed/60/1000) %>%
+  select(Name = artistName, Year, PlayedMin)
+  
+
+# some counts
+(spotifyCounts <- spotifyDF %>% group_by(Year) %>% summarise(Count = n(), sum(PlayedMin)))
+
+# spotify gives you the data for one year, so the value for 2021 is under counting (value in dec 2021 was 11,286)
+
+
+
+```
+
+

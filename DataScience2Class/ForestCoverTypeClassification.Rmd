@@ -1,0 +1,245 @@
+---
+title: "Forest Cover Classification"
+output: html_notebook
+---
+
+# Dataset from Kaggle for predicting and classifying tree types from geospatial data 
+
+## Dataset Description
+
+### The study area includes four wilderness areas located in the Roosevelt National Forest of northern Colorado. Each observation is a 30m x 30m patch. You are asked to predict an integer classification for the forest cover type. The seven types are:
+
+- 1 - Spruce/Fir
+- 2 - Lodgepole Pine
+- 3 - Ponderosa Pine
+- 4 - Cottonwood/Willow
+- 5 - Aspen
+- 6 - Douglas-fir
+- 7 - Krummholz
+
+### The training set (15120 observations) contains both features and the Cover_Type.
+
+### Data Fields
+- Elevation - Elevation in meters
+- Aspect - Aspect in degrees azimuth
+- Slope - Slope in degrees
+- Horizontal_Distance_To_Hydrology - Horz Dist to nearest surface water features
+- Vertical_Distance_To_Hydrology - Vert Dist to nearest surface water features
+- Horizontal_Distance_To_Roadways - Horz Dist to nearest roadway
+- Hillshade_9am (0 to 255 index) - Hillshade index at 9am, summer solstice
+- Hillshade_Noon (0 to 255 index) - Hillshade index at noon, summer solstice
+- Hillshade_3pm (0 to 255 index) - Hillshade index at 3pm, summer solstice
+- Horizontal_Distance_To_Fire_Points - Horz Dist to nearest wildfire ignition points
+- Wilderness_Area (4 binary columns, 0 = absence or 1 = presence) - Wilderness area designation
+- Soil_Type (40 binary columns, 0 = absence or 1 = presence) - Soil Type designation
+- Cover_Type (7 types, integers 1 to 7) - Forest Cover Type designation
+
+
+
+
+## The goal is to classify the rows into which tree type (cover type) they belong.
+
+```{r}
+library(tidyverse)
+library(reshape2)
+
+# read in the raw data
+f1 <- read.csv("c:/Users/tscott/OneDrive - Eastside Preparatory School/Courses/DataScience_2/data/forest-cover-type-prediction/train.csv")
+
+# check it out
+summary(f1)
+
+# remove Id column and set categorical variables to be factor variables
+forestCover <- f1 %>% select(-Id) 
+forestCover[,11:ncol(forestCover)] <- lapply(forestCover[,11:ncol(forestCover)], as.factor)
+
+# inspect
+str(forestCover)
+
+# two of the columns have only 1 level, Soil_Type7 and 15, so those will not be useful for any model
+forestCover <- forestCover %>% select(-Soil_Type7, -Soil_Type15)
+
+# how many of each cover type? Very balanced.
+table(forestCover$Cover_Type)
+
+```
+
+## Check out the frequency distribution of the numeric features
+
+```{r}
+
+# histograms of columns 1-10
+# tips from https://stackoverflow.com/questions/13035834/plot-every-column-in-a-data-frame-as-a-histogram-on-one-page-using-ggplot
+
+# need to melt into single DF
+df <- melt(forestCover[,1:10])
+
+#View(df)
+
+# now can plot using facets, scales = free_x since each has its own range
+ggplot(data=df, aes(x=value)) + facet_wrap(~variable, scales = "free_x") +
+  geom_histogram()
+
+# 1 - Spruce/Fir
+# 2 - Lodgepole Pine
+# 3 - Ponderosa Pine
+# 4 - Cottonwood/Willow
+# 5 - Aspen
+# 6 - Douglas-fir
+# 7 - Krummholz
+
+# add in cover type names for better plots
+forestCover <- forestCover %>% mutate(Cover_Type_Name = case_when(
+  Cover_Type == "1" ~ "Spruce/Fir",
+  Cover_Type == "2" ~ "Lodgepole Pine",
+  Cover_Type == "3" ~ "Ponderosa Pine",
+  Cover_Type == "4" ~ "Cottonwood/Willow",
+  Cover_Type == "5" ~ "Aspen",
+  Cover_Type == "6" ~ "Douglas-fir",
+  TRUE ~ "Krummholz"
+))
+
+# some boxplots by cover type: Elevation, Hydrology, Aspect
+ggplot(data=forestCover) +
+  geom_boxplot(aes(x=Cover_Type_Name, y=Elevation, fill=as.factor(Cover_Type_Name))) +
+  theme(axis.text.x=element_text(angle=90))
+
+ggplot(data=forestCover) +
+  geom_boxplot(aes(x=Cover_Type_Name, y=Horizontal_Distance_To_Hydrology, fill=as.factor(Cover_Type_Name))) +
+  theme(axis.text.x=element_text(angle=90))
+
+
+ggplot(forestCover, aes(x=Aspect, fill=as.factor(Cover_Type_Name))) +
+  geom_histogram(bins = 20) +
+  coord_polar() +
+  labs(title="Aspect by Cover Type", x="Aspect", y="") +
+  scale_fill_discrete(name="Cover Type")
+
+```
+
+## There are certainly some differences between tree cover type, e.g. Aspen and Cottonwood/Willow prefer eastern aspects
+
+### Let's try k-means clustering by the numerics, knowing there are 7 clusters and see how separable these are
+
+```{r}
+#install.packages("useful")
+library(useful) # for plotting k-means clusters
+library(caTools) # for sample splitting
+
+# get numeric columns only for k-means
+forestClust <- forestCover %>% select(1:10)
+
+# sample it since plotting clusters takes too long
+set.seed(732)
+
+# sample to 20% of the data
+forestClustSample <- forestClust %>% sample_frac(0.20)
+
+
+start1 <- Sys.time()
+#build k-means clusters
+forest7 <- kmeans(forestClustSample, centers = 7)
+forest7
+
+
+# how do they look? 
+plot(forest7, data=forestClustSample)
+end1 <- Sys.time()          # Finishing time
+(time1 <- end1 - start1) # total time
+
+```
+
+## They look pretty cleanly divided with only two principal components, so we ought to be able to classify them with decent accuracy
+
+
+
+
+
+
+
+
+
+
+
+## Try a Decision Tree and maybe Random Forest. Evaluate using confusionMatrix from caret package for accuracy.
+
+```{r}
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(e1071)
+library(caret)
+library(RColorBrewer)
+library(rattle)
+
+# drop name column now
+forestCover <- forestCover %>% select(-Cover_Type_Name)
+
+# create train/test split
+set.seed(732)
+sample <- sample.split(forestCover$Elevation, SplitRatio = 0.7)
+forestTrain <- subset(forestCover, sample == TRUE)
+forestTest <- subset(forestCover, sample == FALSE)
+
+str(forestTest)
+
+# build the tree
+start1 <- Sys.time()
+myTree <- rpart(data=forestTrain, Cover_Type ~ .)
+end1 <- Sys.time()          # Finishing time
+(time1 <- end1 - start1) # total time
+
+# check it out and plot the tree
+printcp(myTree)
+#summary(myTree)
+fancyRpartPlot(myTree)
+plotcp(myTree)
+
+# try lowering cp
+# prunedTreeLessCP <- prune.rpart(myTree, cp=0.005)
+# fancyRpartPlot(prunedTreeLessCP)
+# printcp(prunedTreeLessCP)
+
+# get prediction so we can get accuracy
+forestPred <- predict(myTree, newdata = forestTest, type='class')
+
+# Create Confusion Matrix to get accuracy
+
+confusionMatrix(forestPred, forestTest$Cover_Type)
+```
+### Accuracy 63.8% from base decision tree (unpruned)
+
+## Random Forest
+```{r}
+
+
+# make the forests
+start1 <- Sys.time()
+myForest <- randomForest(data=forestTrain, Cover_Type ~ .)
+end1 <- Sys.time()          # Finishing time
+(time1 <- end1 - start1) # total time
+
+# takes quite a bit longer than decision tree
+
+# check it out 
+myForest
+
+#accuracy on training set = 82.2% which is much better!
+
+# What other amounts can we try based on the error plot?
+plot(myForest)
+
+# could mess with number of trees, and also mtry 
+
+# how about variable importance? Elevation is the clear winner
+varImpPlot(myForest, main="Feature Importance", col="steelblue", pch=20)
+
+# predictions on test set
+RFpred <- predict(myForest, newdata=forestTest)
+
+# full confusion matrix for accuracy on test set
+confusionMatrix(RFpred, forestTest$Cover_Type, positive='yes')
+
+```
+
+## Random Forest model accuracy = 83.3%
